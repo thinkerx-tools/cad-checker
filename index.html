@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAD 图形检测台 — DXF/DWG 封闭性·包含·相交检测与修复</title>
+<meta name="description" content="在浏览器中打开 DXF/DWG 图纸，检测未闭合图形、闭合图形包含关系与线条相交，逐项删除或自动修复，并重新导出 DXF 文件。全程本地处理，文件不上传。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a1220'/%3E%3Cpath d='M8 22V10h6a5 5 0 0 1 0 10H10' fill='none' stroke='%233fd8c7' stroke-width='2.4'/%3E%3Ccircle cx='23' cy='21' r='4.4' fill='none' stroke='%23ffb454' stroke-width='2.2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="var(--site-bg)" stroke="var(--site-border)"/>
+        <path d="M8 22V10h6a5 5 0 0 1 0 10H10" fill="none" stroke="var(--site-accent)" stroke-width="2.4"/>
+        <circle cx="23" cy="21" r="4.4" fill="none" stroke="var(--warn)" stroke-width="2.2"/>
+      </svg>
+      <h1>CAD 图形检测台<small>封闭性 · 包含关系 · 线条相交</small></h1>
+    </div>
+    <span class="file-name" id="fileName"></span>
+    <button class="btn" id="btnOpen">打开文件</button>
+    <button class="btn" id="btnSample">加载示例</button>
+    <button class="btn" id="btnUndo" disabled>撤销</button>
+    <button class="btn primary" id="btnExport" disabled>导出 DXF</button>
+    <input type="file" id="fileInput" accept=".dxf,.dwg" class="hidden" aria-label="选择 DXF 或 DWG 文件">
+  </header>
+
+  <div class="main">
+    <div class="stage" id="stage">
+      <canvas id="canvas" aria-label="图纸预览画布"></canvas>
+
+      <div class="empty" id="empty">
+        <div class="drop-card">
+          <svg width="52" height="52" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="6" y="6" width="26" height="26" rx="3" fill="none" stroke="var(--site-accent)" stroke-width="2"/>
+            <circle cx="33" cy="33" r="9" fill="none" stroke="var(--warn)" stroke-width="2"/>
+            <path d="M12 26l6-8 5 6 4-5" fill="none" stroke="var(--site-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h2>拖入 DXF / DWG 图纸</h2>
+          <p>自动检测未闭合图形、闭合图形包含关系与线条相交，<br>逐项选择删除或修复，完成后重新导出 DXF。</p>
+          <div class="drop-actions">
+            <button class="btn primary" id="btnPick">选择文件</button>
+            <button class="btn" id="btnSample2">加载示例图纸</button>
+          </div>
+          <div class="privacy">全程在浏览器本地解析与修复，图纸不会上传到任何服务器。</div>
+        </div>
+      </div>
+
+      <div class="loading hidden" id="loading">
+        <div class="spinner" aria-hidden="true"></div>
+        <span id="loadingText">正在解析…</span>
+      </div>
+
+      <div class="toast hidden" id="toast" role="status"></div>
+
+      <div class="stage-tools hidden" id="stageTools">
+        <button class="btn" id="btnZoomIn" title="放大" aria-label="放大">+</button>
+        <button class="btn" id="btnZoomOut" title="缩小" aria-label="缩小">−</button>
+        <button class="btn" id="btnFit" title="适配视图" aria-label="适配视图">⛶</button>
+      </div>
+
+      <div class="stage-stats hidden" id="stageStats">
+        <span class="chip">实体 <b id="stEntities">0</b></span>
+        <span class="chip">图形 <b id="stShapes">0</b></span>
+        <span class="chip">闭合 <b id="stClosed">0</b></span>
+      </div>
+    </div>
+
+    <aside class="panel" aria-label="检测结果面板">
+      <div class="panel-head">
+        <h2>检测结果</h2>
+        <div class="summary">
+          <div class="stat ok"><span class="num" id="nClosed">–</span><span class="lbl">闭合图形</span></div>
+          <div class="stat open"><span class="num" id="nOpen">–</span><span class="lbl">未闭合</span></div>
+          <div class="stat contain"><span class="num" id="nContain">–</span><span class="lbl">包含关系</span></div>
+          <div class="stat cross"><span class="num" id="nCross">–</span><span class="lbl">线条相交</span></div>
+        </div>
+      </div>
+      <div class="panel-controls hidden" id="panelControls">
+        <label>闭合容差
+          <input type="number" id="tolInput" min="0" step="any" aria-label="闭合容差（图纸单位）">
+        </label>
+        <span class="spacer"></span>
+        <button class="btn small fix" id="btnFixAll">全部修复</button>
+      </div>
+      <div class="issue-list" id="issueList">
+        <div class="all-clear" id="placeholder">
+          <span class="big">⌖</span>
+          打开图纸后，这里会列出检测到的异常，<br>点击条目可在画布中定位。
+        </div>
+      </div>
+      <div class="panel-foot">
+        规则：① 图形必须封闭 ② 闭合图形之间不应存在包含 ③ 图形之间线条不得相交。导出保留未修改实体，修复结果以折线写入 DXF（R12）。
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
